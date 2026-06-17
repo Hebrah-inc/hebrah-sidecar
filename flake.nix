@@ -25,6 +25,30 @@
         else
           hostSystem;
 
+      # Per-VM host ports are chosen at runtime (HEBRAH_*_HOST_PORT). microvm.forwardPorts
+      # is eval-time static, so QEMU user netdev + hostfwd stay in extraArgsScript — do not
+      # also set microvm.interfaces for qemu (would duplicate netdevs).
+      hebrahQemuExtraArgsScript = hypervisor: guestPkgs:
+        guestPkgs.writeShellScript "hebrah-extra-args" ''
+          set -euo pipefail
+          CONFIG_DIR="''${HEBRAH_VM_CONFIG_DIR:?HEBRAH_VM_CONFIG_DIR required}"
+          PORT="''${HEBRAH_HEALTH_HOST_PORT:?HEBRAH_HEALTH_HOST_PORT required}"
+          WB_PORT="''${HEBRAH_WRITEBACK_HOST_PORT:-$((PORT + 1))}"
+          HL7_PORT="''${HEBRAH_HL7_HOST_PORT:-$((PORT + 2))}"
+          MLLP_PORT="''${HEBRAH_MLLP_HOST_PORT:-$((PORT + 3))}"
+          HYP="${hypervisor}"
+          if [ "$HYP" = "qemu" ]; then
+            # microvm machine (MMIO): virtio-net-device + virtio-9p-device (not *-pci).
+            echo "-netdev user,id=hebrah0,hostfwd=tcp:127.0.0.1:''${PORT}-:8080,hostfwd=tcp:127.0.0.1:''${WB_PORT}-:8082,hostfwd=tcp:127.0.0.1:''${HL7_PORT}-:8083,hostfwd=tcp:127.0.0.1:''${MLLP_PORT}-:2575"
+            echo "-device virtio-net-device,netdev=hebrah0"
+            # QEMU 11+: mapped-xattr creates host files as the QEMU user; fmode/dmode keep health.json readable.
+            echo "-fsdev local,id=hebrahconfig,path=''${CONFIG_DIR},security_model=mapped-xattr,fmode=0644,dmode=0755,writeout=immediate"
+            echo "-device virtio-9p-device,mount_tag=hebrah-config,fsdev=hebrahconfig"
+          elif [ "$HYP" = "vfkit" ]; then
+            echo "--device virtio-fs,sharedDir=''${CONFIG_DIR},mountTag=hebrah-config"
+          fi
+        '';
+
       mkMicrovmModule = { name, extraModule, hypervisor }:
         { guestSystem, guestPkgs }:
         [
@@ -35,8 +59,9 @@
             system.stateVersion = "24.11";
             microvm = {
               vcpu = 1;
-              mem = 512;
+              mem = 1024;
               inherit hypervisor;
+              qemu.machine = "microvm";
               volumes = [
                 {
                   mountPoint = "/var";
@@ -44,22 +69,10 @@
                   size = 256;
                 }
               ];
-              interfaces = [
+              interfaces = guestPkgs.lib.optionals (hypervisor != "qemu") [
                 { type = "user"; id = "eth0"; mac = "02:fc:00:00:00:01"; }
               ];
-              extraArgsScript = "${guestPkgs.writeShellScript "hebrah-extra-args" ''
-                set -euo pipefail
-                CONFIG_DIR="''${HEBRAH_VM_CONFIG_DIR:?HEBRAH_VM_CONFIG_DIR required}"
-                PORT="''${HEBRAH_HEALTH_HOST_PORT:?HEBRAH_HEALTH_HOST_PORT required}"
-                HYP="${hypervisor}"
-                if [ "$HYP" = "qemu" ]; then
-                  echo "-netdev user,id=hebrah0,hostfwd=tcp:127.0.0.1:''${PORT}-:8080"
-                  echo "-device virtio-net-pci,netdev=hebrah0"
-                  echo "-virtfs local,path=''${CONFIG_DIR},mount_tag=hebrah-config,security_model=mapped,id=hebrahconfig"
-                elif [ "$HYP" = "vfkit" ]; then
-                  echo "--device virtio-fs,sharedDir=''${CONFIG_DIR},mountTag=hebrah-config"
-                fi
-              ''}";
+              extraArgsScript = "${hebrahQemuExtraArgsScript hypervisor guestPkgs}";
             };
           }
         ];
@@ -100,7 +113,10 @@
               PIDFILE="''${HEBRAH_VM_PIDFILE:?HEBRAH_VM_PIDFILE required}"
               LOGFILE="''${HEBRAH_VM_LOGFILE:-$CONFIG_DIR/vm.log}"
               mkdir -p "$CONFIG_DIR"
-              RUNNER="$(${pkgs.findutils}/bin/find "${runnerDerivation}/bin" -type f | ${pkgs.coreutils}/bin/head -n1)"
+              RUNNER="${runnerDerivation}/bin/microvm-run"
+              if [ ! -x "$RUNNER" ]; then
+                RUNNER="$(${pkgs.findutils}/bin/find "${runnerDerivation}/bin" -maxdepth 1 -executable -print -quit)"
+              fi
               if [ ! -x "$RUNNER" ]; then
                 echo "microvm runner not found in ${runnerDerivation}/bin" >&2
                 exit 1

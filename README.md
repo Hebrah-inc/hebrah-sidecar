@@ -1,6 +1,8 @@
 # hebrah-sidecar
 
-NixOS microVM image for hebrah connection sidecars. Built with [microvm.nix](https://microvm.nix.github.io/microvm.nix/) for local development (vfkit on macOS, QEMU on Linux) and designed for future AWS Firecracker deployment.
+**Prefer [hebrah-vm-templates](../hebrah-vm-templates/)** for new VM work: golden erofs bundles and `HYPERVISOR=golden-qemu` on the Mac orchestrator. This repo remains a **legacy** flake for cold `nix run` via `HYPERVISOR=microvm-nix`.
+
+NixOS microVM image for hebrah connection sidecars. Built with [microvm.nix](https://microvm.nix.github.io/microvm.nix/) for local development (vfkit on macOS, QEMU on Linux).
 
 ## Flake outputs
 
@@ -44,8 +46,38 @@ curl -s "http://127.0.0.1:$HEBRAH_HEALTH_HOST_PORT/health" | jq .
 
 ## Health contract
 
-- HTTP: `GET :8080/health` → `{ "status": "ok", "vm_id": "...", "stage": "ready" }`
-- File (shared virtiofs dir): `health.json` with the same payload (used when host port-forward is unavailable)
+Provisioning health uses **9p `health.json` on the host** as the primary probe (orchestrator reads `vm_dir/health.json` written by the guest). HTTP is secondary / used for HL7 flight checks.
+
+| Probe | Path | When |
+|-------|------|------|
+| **Primary** | `$HEBRAH_VM_CONFIG_DIR/health.json` on host (9p virtio share) | Create → health gate |
+| **Secondary** | `GET :8080/health` via QEMU hostfwd | Fallback, HL7 probe |
+
+- File payload: `{ "status": "ok", "vm_id": "...", "stage": "ready", ... }`
+- HTTP: same JSON at `GET :8080/health`
+
+### microvm.nix integration
+
+Built with [microvm.nix](https://github.com/microvm-nix/microvm.nix): guest NixOS image, `microvm-run`, Cachix substituter `microvm.cachix.org`.
+
+Runtime config uses `extraArgsScript` (not `microvm.shares`) because `HEBRAH_VM_CONFIG_DIR` and per-VM host ports are chosen at launch time. QEMU user netdev + `hostfwd` stay in `extraArgsScript`; 9p export uses `security_model=mapped-xattr` with `fmode`/`dmode` so guest-created files appear on the host as the QEMU user (`ubuntu` on EC2). `passthrough` maps guest root to host root and fails when QEMU is unprivileged.
+
+## Phase 2 sidecar agents
+
+| Port | Service | Purpose |
+|------|---------|---------|
+| 8080 | health | Provisioning health check |
+| 8082 | write-back | `POST /v1/writeback/chart-note`, `/order`, `/task-response` |
+| 8083 | HL7 HTTP | `POST /hl7/inject` |
+| 2575 | HL7 MLLP | TCP listener with AA ACK |
+
+Host port forwards (QEMU): `HEBRAH_HEALTH_HOST_PORT`, `+1` write-back, `+2` HL7 HTTP, `+3` MLLP.
+
+Clinic simulator (`clinic-launcher`): `POST /hl7/send/{template_id}` on `:8081` pushes MLLP to the sidecar WG address.
+
+Pair locally: `bash scripts/dev-clinic-sidecar-pair.sh` (hebrah root).
+
+Orchestrator HL7 flight check: `POST /v1/vms/{vm_id}/hl7-probe`
 
 ## AWS-ready artifacts (not deployed yet)
 
@@ -65,5 +97,7 @@ Written by orchestrator to `$HEBRAH_VM_CONFIG_DIR/hebrah.env`:
 | `HEBRAH_ORG_ID` | Organization id |
 | `HEBRAH_CONNECTION_ID` | Connection id |
 | `HEBRAH_ENVIRONMENT` | `sandbox` or `live` |
+| `HEBRAH_API_URL` | Control plane URL for sidecar event ingress |
+| `HEBRAH_INTERNAL_SECRET` | Shared secret for `/v1/internal/sidecar/events` |
 | `HEBRAH_WG_PRIVATE_KEY` | WireGuard private key (microvm-nix mode) |
 | `HEBRAH_WG_LISTEN_PORT` | UDP listen port |
