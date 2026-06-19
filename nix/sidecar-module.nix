@@ -99,7 +99,33 @@ EOF
           "HEBRAH_HL7_HTTP_PORT=8083"
           "HEBRAH_HL7_MLLP_PORT=2575"
         ];
+        ExecStartPre = lib.mkIf (config.microvm.hypervisor == "qemu") (pkgs.writeShellScript "hebrah-hl7-9p-slot" ''
+          set -eu
+          # Guest-created 9p files accept host overwrites; host-created inject files do not.
+          printf '%s\n' '{"message":""}' > /hebrah-config/hl7_inject.json
+          printf '%s\n' '{}' > /hebrah-config/hl7_ack.json
+        '');
         ExecStart = "${hl7Pkg}/bin/hebrah-sidecar-hl7";
+      };
+    };
+
+    # Host→guest 9p: inotify via systemd.path (polling misses new files on some 9p setups).
+    systemd.services.hebrah-sidecar-hl7-9p-inject = lib.mkIf (config.microvm.hypervisor == "qemu") {
+      description = "Process HL7 inject file from 9p share";
+      serviceConfig = {
+        Type = "oneshot";
+        Environment = [ "HEBRAH_CONFIG_DIR=/hebrah-config" ];
+        ExecStart = "${hl7Pkg}/bin/hebrah-sidecar-hl7 --inject-file";
+      };
+    };
+
+    systemd.timers.hebrah-sidecar-hl7-9p-inject = lib.mkIf (config.microvm.hypervisor == "qemu") {
+      description = "Poll 9p share for hl7_inject.json";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "hebrah-sidecar-config.service" "remote-fs.target" ];
+      timerConfig = {
+        OnBootSec = "15s";
+        OnUnitActiveSec = "2s";
       };
     };
 

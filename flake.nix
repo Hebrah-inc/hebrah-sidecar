@@ -38,12 +38,10 @@
           MLLP_PORT="''${HEBRAH_MLLP_HOST_PORT:-$((PORT + 3))}"
           HYP="${hypervisor}"
           if [ "$HYP" = "qemu" ]; then
-            # microvm machine (MMIO): virtio-net-device + virtio-9p-device (not *-pci).
             echo "-netdev user,id=hebrah0,hostfwd=tcp:127.0.0.1:''${PORT}-:8080,hostfwd=tcp:127.0.0.1:''${WB_PORT}-:8082,hostfwd=tcp:127.0.0.1:''${HL7_PORT}-:8083,hostfwd=tcp:127.0.0.1:''${MLLP_PORT}-:2575"
-            echo "-device virtio-net-device,netdev=hebrah0"
-            # QEMU 11+: mapped-xattr creates host files as the QEMU user; fmode/dmode keep health.json readable.
+            echo "-device virtio-net-pci,netdev=hebrah0"
             echo "-fsdev local,id=hebrahconfig,path=''${CONFIG_DIR},security_model=mapped-xattr,fmode=0644,dmode=0755,writeout=immediate"
-            echo "-device virtio-9p-device,mount_tag=hebrah-config,fsdev=hebrahconfig"
+            echo "-device virtio-9p-pci,mount_tag=hebrah-config,fsdev=hebrahconfig"
           elif [ "$HYP" = "vfkit" ]; then
             echo "--device virtio-fs,sharedDir=''${CONFIG_DIR},mountTag=hebrah-config"
           fi
@@ -60,8 +58,9 @@
             microvm = {
               vcpu = 1;
               mem = 1024;
+              cpu = "max";
               inherit hypervisor;
-              qemu.machine = "microvm";
+              qemu.machine = "virt";
               volumes = [
                 {
                   mountPoint = "/var";
@@ -73,6 +72,7 @@
                 { type = "user"; id = "eth0"; mac = "02:fc:00:00:00:01"; }
               ];
               extraArgsScript = "${hebrahQemuExtraArgsScript hypervisor guestPkgs}";
+              balloon = false;
             };
           }
         ];
@@ -106,6 +106,7 @@
           } guestSystem;
           sidecarRunner = sidecarCfg.config.microvm.declaredRunner;
           clinicRunner = clinicCfg.config.microvm.declaredRunner;
+          hl7Pkg = pkgs.callPackage ./packages/hebrah-sidecar-hl7.nix { };
           mkLauncher = { runner, cfgName, runnerDerivation }:
             pkgs.writeShellScriptBin "hebrah-${cfgName}-launcher" ''
               set -euo pipefail
@@ -121,6 +122,7 @@
                 echo "microvm runner not found in ${runnerDerivation}/bin" >&2
                 exit 1
               fi
+              cd "$CONFIG_DIR"
               nohup "$RUNNER" >"$LOGFILE" 2>&1 &
               echo $! >"$PIDFILE"
               echo "started ${cfgName} pid=$(cat "$PIDFILE") config=$CONFIG_DIR"
@@ -147,6 +149,8 @@
           sidecar-rootfs = sidecarCfg.config.microvm.buildRootfs or pkgs.runCommand "sidecar-rootfs-placeholder" { } ''
             echo "build on linux guest eval" > $out
           '';
+
+          hebrah-sidecar-hl7 = hl7Pkg;
         };
 
     in
