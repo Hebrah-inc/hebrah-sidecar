@@ -1,44 +1,10 @@
-# Build artefacts
 result
 .direnv
 .direnv/
-
-# Nix
-/nix/
-*.drv
-
-# VM disk / image artefacts
 *.img
 *.qcow2
-*.erofs
 
-# Local environment — never commit
-.env
-.env.*
-!.env.example
-
-# Python (guest package scripts under packages/)
+# Python — keep guest source reproducible from a single .py file
 __pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-
-# macOS / editor
-.DS_Store
-.idea/
-.vscode/
-**/._*
-
-# Logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-yarn-debug.log*
-
-# Coverage
-coverage/
-*.lcov
-
-# Test artefacts
-test-results/
-playwright-report/
+*.pyc
+*.pyo
