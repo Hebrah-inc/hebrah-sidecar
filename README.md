@@ -1,24 +1,14 @@
 # hebrah-sidecar
 
-> ⚠️ **Legacy flake.** New VM work happens in
-> [`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates)
-> — golden erofs bundles, `HYPERVISOR=golden-qemu` on the Mac orchestrator,
-> and the active security work. This repo remains as a reference for
-> cold `nix run` via `HYPERVISOR=microvm-nix`.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Status: Legacy](https://img.shields.io/badge/status-LEGACY-lightgrey)](https://github.com/Hebrah-inc/hebrah-vm-templates)
+[![NixOS](https://img.shields.io/badge/NixOS-unstable-5277C3?logo=nixos&logoColor=white)](https://nixos.org/)
+[![GitHub stars](https://img.shields.io/github/stars/Hebrah-inc/hebrah-sidecar.svg?style=social)](https://github.com/Hebrah-inc/hebrah-sidecar)
+[![GitHub issues](https://img.shields.io/github/issues/Hebrah-inc/hebrah-sidecar.svg)](https://github.com/Hebrah-inc/hebrah-sidecar/issues)
 
-NixOS microVM image for [Hebrah](https://github.com/Hebrah-inc) connection
-sidecars. Built with
-[microvm.nix](https://github.com/microvm-nix/microvm.nix) for local
-development (vfkit on macOS, QEMU on Linux).
+> ⚠️ **Prefer [`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates) for new VM work.** That repo ships golden erofs bundles and is what the Mac orchestrator runs under `HYPERVISOR=golden-qemu`. This repo remains a **legacy** flake for cold `nix run` via `HYPERVISOR=microvm-nix`.
 
-## Status
-
-| | |
-|---|---|
-| Maintenance | Bug fixes only |
-| Active dev | [`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates) |
-| MCP server | [`hebrah-mcp-host`](https://github.com/Hebrah-inc/hebrah-mcp-host) |
-| Control plane | [`hebrah-api`](https://github.com/Hebrah-inc/hebrah-api) |
+NixOS microVM image for hebrah connection sidecars. Built with [microvm.nix](https://microvm.nix.github.io/microvm.nix/) for local development (vfkit on macOS, QEMU on Linux).
 
 ## Flake outputs
 
@@ -34,9 +24,7 @@ development (vfkit on macOS, QEMU on Linux).
 ## Prerequisites
 
 - [Nix](https://nixos.org/download.html) with flakes enabled
-- On **macOS**: a **Linux remote builder** to build the NixOS guest. See
-  [local-microvm-development.md](https://github.com/Hebrah-inc/hebrah/blob/main/documentation/local-microvm-development.md)
-  for the hebrah-specific helper script (`scripts/setup-nix-linux-builder.sh`).
+- On **macOS**: a **Linux remote builder** to build the NixOS guest (see the umbrella repo's [local-microvm-development.md](https://github.com/Hebrah-inc/hebrah/blob/main/documentation/local-microvm-development.md))
 
 ## Build
 
@@ -101,10 +89,7 @@ guest root to host root and fails when QEMU is unprivileged.
 Host port forwards (QEMU): `HEBRAH_HEALTH_HOST_PORT`, `+1` write-back,
 `+2` HL7 HTTP, `+3` MLLP.
 
-Clinic simulator (`clinic-launcher`): `POST /hl7/send/{template_id}` on
-`:8081` pushes MLLP to the sidecar WG address. The
-`scripts/dev-clinic-sidecar-pair.sh` helper that pairs them lives in the
-hebrah umbrella repo (not here).
+Pair locally: `bash scripts/dev-clinic-sidecar-pair.sh` (from the umbrella `hebrah` repo root).
 
 Orchestrator HL7 flight check: `POST /v1/vms/{vm_id}/hl7-probe`
 
