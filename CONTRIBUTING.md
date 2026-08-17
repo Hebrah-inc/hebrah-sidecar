@@ -1,79 +1,85 @@
 # Contributing to hebrah-sidecar
 
-> **Note:** This repo is **legacy**. New VM work belongs in
-> [`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates).
-> Pull requests here should be limited to bug fixes that keep the legacy
-> `HYPERVISOR=microvm-nix` cold-`nix run` flow working on existing developer
-> machines.
+> **This repo is legacy.** New VM work happens in
+> [`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates),
+> which carries the active golden-image workflow. This flake remains as a
+> reference for `HYPERVISOR=microvm-nix` cold launches and as a
+> historical record.
+
+## Repo scope
+
+This repo ships the legacy NixOS microVM template + launcher used by the
+hebrah orchestrator's `microvm-nix` backend.
+
+| Path | Purpose |
+|------|---------|
+| `flake.nix` | Flake outputs — `packages.<host>.{sidecar-launcher,sidecar-microvm,clinic-launcher,clinic-simulator,sidecar-rootfs,hebrah-sidecar-hl7}`, dev shells, `nixosConfigurations.{sidecar,clinic-simulator}`. |
+| `nix/` | NixOS module fragments (`sidecar-module.nix`, `clinic-simulator-module.nix`). |
+| `packages/` | Python services that ship inside the guest (health, HL7 v2, write-back, FHIR clinic stubs). |
+
+It is **not** the control plane (see [`hebrah-api`](https://github.com/Hebrah-inc/hebrah-api))
+and it is **not** the active golden-image template set (see
+[`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates)).
 
 ## Development setup
 
-You need Nix with flakes enabled, and — on macOS — a Linux remote builder
-to build the Linux guest.
+You need Nix with flakes enabled:
 
 ```bash
-git clone https://github.com/Hebrah-inc/hebrah-sidecar.git
-cd hebrah-sidecar
-
-# build
-nix build .#sidecar-launcher
-
-# run (after exporting HEBRAH_VM_CONFIG_DIR and HEBRAH_HEALTH_HOST_PORT)
-nix run .#sidecar-launcher
+nix --extra-experimental-features 'nix-command flakes' build .#packages.x8664-linux.sidecar-launcher
 ```
 
-## Layout
+If you're on macOS you'll want a Linux remote builder for the `*linux` outputs:
 
-```text
-.
-├── flake.nix                # Outputs: packages.<host>.sidecar-launcher / sidecar-microvm
-├── flake.lock
-├── README.md
-├── LICENSE                  # MIT
-├── SECURITY.md              # Private disclosure channel
-├── CODE_OF_CONDUCT.md       # Contributor Covenant v2.1
-├── .gitignore
-├── nix/                     # NixOS module fragments
-│   ├── sidecar-module.nix
-│   └── clinic-simulator-module.nix
-└── packages/                # Python services inside the guest
-    ├── hebrah-sidecar-health.{py,nix}
-    ├── hebrah-sidecar-hl7.{py,nix}
-    ├── hebrah-sidecar-writeback.{py,nix}
-    ├── clinic-fhir-server.py
-    └── clinic-hl7-server.py
+```bash
+# See https://github.com/nix-darwin/nix-darwin or Lima + nix-docker
+# The hebrah monorepo ships a helper:
+#   bash scripts/setup-nix-linux-builder.sh   (umbrella repo only)
 ```
 
-## Coding style
+For local smoke testing of the orchestrator sidecar path, see the umbrella docs:
 
-- **Nix**: `nixfmt` (or `nixfmt-rfc-style`).
-- **Python**: PEP 8 + `pathlib` + `argparse`. Guest services intentionally use
-  `BaseHTTPHandler` to keep the rootfs small — don't introduce `flask` /
-  `fastapi` without discussion.
-- **Shell**: `set -euo pipefail` at the top of every script.
+- [vm-platform-architecture.md](https://github.com/Hebrah-inc/hebrah/blob/main/documentation/vm-platform-architecture.md)
+- [local-microvm-development.md](https://github.com/Hebrah-inc/hebrah/blob/main/documentation/local-microvm-development.md)
 
-## Adding a guest service
+External contributors who don't have the umbrella repo can still:
+
+1. `nix flake show` to see all outputs.
+2. `nix build .#packages.<host>.sidecar-launcher` to build the launcher.
+3. `nix develop` for an interactive shell with `nix`, `nixfmt-classic`, `jq`,
+   `curl`, `wireguard-tools` on `$PATH`.
+
+## Code style
+
+- **Nix**: `nixfmt` (the formatter is in the dev shell).
+- **Python**: PEP 8 + `pathlib` + `argparse`. The guest services use
+  `BaseHTTPHandler` deliberately to keep the rootfs small; please don't
+  introduce `flask`/`fastapi` dependencies without discussion.
+- **Shell**: `set -euo pipefail` at the top of every script. No `bash` features
+  beyond 5.x.
+
+## Adding a new guest service
 
 1. Add `packages/<name>.py` and `packages/<name>.nix` (the `.nix` just
    `readFile`s the `.py` so the rootfs is reproducible from a single source).
-2. Mount it from the relevant module in `nix/`.
-3. If it exposes admin endpoints, gate them on `X-Hebrah-Internal-Secret`
-   matching the env-loaded secret.
+2. Mount it from `nix/sidecar-module.nix`.
+3. If it exposes admin endpoints, **always** gate them on
+   `X-Hebrah-Internal-Secret` matching the env-loaded secret. See
+   `packages/hebrah-sidecar-hl7.py` for the pattern.
 
-## Pull request process
+> Prefer doing this in [`hebrah-vm-templates`](https://github.com/Hebrah-inc/hebrah-vm-templates)
+> instead — this repo is frozen.
 
-1. Fork the repository and create a branch.
-2. Run `nix flake check` and `nix build .#sidecar-launcher` before pushing.
-3. Keep PRs scoped — one change per PR.
-4. Open a PR. CI will run `nix flake check` and `nix build` of the sidecar
-   launcher.
+## Pull requests
+
+1. Fork the repo and create a branch.
+2. Run `nix flake check` before pushing.
+3. Keep PRs scoped — one template / one service / one launch script change
+   per PR is easier to review.
+4. If the change is useful for active deployments, consider proposing it on
+   `hebrah-vm-templates` instead.
 
 ## Security disclosures
 
-See [`SECURITY.md`](./SECURITY.md). Please don't file public issues for
-security bugs — email security@hebrah.com.
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the
-MIT License. See [`LICENSE`](./LICENSE).
+See [SECURITY.md](./SECURITY.md). **Please don't** file public issues for
+security bugs — email security@hebrah.com instead.
