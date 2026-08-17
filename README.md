@@ -18,7 +18,8 @@ NixOS microVM image for hebrah connection sidecars. Built with [microvm.nix](htt
 | `packages.<host>.sidecar-microvm` | microvm.nix declared runner |
 | `packages.<host>.clinic-simulator` | Clinic stub microVM runner |
 | `packages.<host>.clinic-launcher` | Start clinic simulator |
-| `packages.<host>.sidecar-rootfs` | Rootfs artifact (AWS-ready; erofs when built on Linux) |
+| `packages.<host>.sidecar-rootfs` | Rootfs artifact (erofs when built on Linux) |
+| `packages.<host>.hebrah-sidecar-hl7` | Standalone HL7 v2 guest package |
 
 ## Prerequisites
 
@@ -29,7 +30,7 @@ NixOS microVM image for hebrah connection sidecars. Built with [microvm.nix](htt
 
 ```bash
 cd hebrah-sidecar
-nix build .#sidecar-launcher
+nix --extra-experimental-features 'nix-command flakes' build .#sidecar-launcher
 ```
 
 ## Run manually (orchestrator normally does this)
@@ -46,13 +47,15 @@ HEBRAH_CONNECTION_ID=conn_demo
 HEBRAH_ENVIRONMENT=sandbox
 EOF
 
-nix run .#sidecar-launcher
+nix --extra-experimental-features 'nix-command flakes' run .#sidecar-launcher
 curl -s "http://127.0.0.1:$HEBRAH_HEALTH_HOST_PORT/health" | jq .
 ```
 
 ## Health contract
 
-Provisioning health uses **9p `health.json` on the host** as the primary probe (orchestrator reads `vm_dir/health.json` written by the guest). HTTP is secondary / used for HL7 flight checks.
+Provisioning health uses **9p `health.json` on the host** as the primary
+probe (orchestrator reads `vm_dir/health.json` written by the guest). HTTP is
+secondary / used for HL7 flight checks.
 
 | Probe | Path | When |
 |-------|------|------|
@@ -64,9 +67,15 @@ Provisioning health uses **9p `health.json` on the host** as the primary probe (
 
 ### microvm.nix integration
 
-Built with [microvm.nix](https://github.com/microvm-nix/microvm.nix): guest NixOS image, `microvm-run`, Cachix substituter `microvm.cachix.org`.
+Built with [microvm.nix](https://github.com/microvm-nix/microvm.nix): guest
+NixOS image, `microvm-run`, Cachix substituter `microvm.cachix.org`.
 
-Runtime config uses `extraArgsScript` (not `microvm.shares`) because `HEBRAH_VM_CONFIG_DIR` and per-VM host ports are chosen at launch time. QEMU user netdev + `hostfwd` stay in `extraArgsScript`; 9p export uses `security_model=mapped-xattr` with `fmode`/`dmode` so guest-created files appear on the host as the QEMU user (`ubuntu` on EC2). `passthrough` maps guest root to host root and fails when QEMU is unprivileged.
+Runtime config uses `extraArgsScript` (not `microvm.shares`) because
+`HEBRAH_VM_CONFIG_DIR` and per-VM host ports are chosen at launch time.
+QEMU user netdev + `hostfwd` stay in `extraArgsScript`; 9p export uses
+`security_model=mapped-xattr` with `fmode`/`dmode` so guest-created files
+appear on the host as the QEMU user (`ubuntu` on EC2). `passthrough` maps
+guest root to host root and fails when QEMU is unprivileged.
 
 ## Phase 2 sidecar agents
 
@@ -77,21 +86,34 @@ Runtime config uses `extraArgsScript` (not `microvm.shares`) because `HEBRAH_VM_
 | 8083 | HL7 HTTP | `POST /hl7/inject` |
 | 2575 | HL7 MLLP | TCP listener with AA ACK |
 
-Host port forwards (QEMU): `HEBRAH_HEALTH_HOST_PORT`, `+1` write-back, `+2` HL7 HTTP, `+3` MLLP.
-
-Clinic simulator (`clinic-launcher`): `POST /hl7/send/{template_id}` on `:8081` pushes MLLP to the sidecar WG address.
+Host port forwards (QEMU): `HEBRAH_HEALTH_HOST_PORT`, `+1` write-back,
+`+2` HL7 HTTP, `+3` MLLP.
 
 Pair locally: `bash scripts/dev-clinic-sidecar-pair.sh` (from the umbrella `hebrah` repo root).
 
 Orchestrator HL7 flight check: `POST /v1/vms/{vm_id}/hl7-probe`
 
-## AWS-ready artifacts (not deployed yet)
+## Layout
 
-```bash
-nix build .#sidecar-rootfs
+```text
+.
+├── flake.nix                # Outputs: see table above
+├── flake.lock
+├── LICENSE
+├── README.md
+├── SECURITY.md
+├── CONTRIBUTING.md
+├── .gitignore
+├── nix/                    # NixOS module fragments
+│   ├── sidecar-module.nix
+│   └── clinic-simulator-module.nix
+└── packages/               # Python services inside the guest
+    ├── clinic-fhir-server.py
+    ├── clinic-hl7-server.py
+    ├── hebrah-sidecar-health.{py,nix}
+    ├── hebrah-sidecar-hl7.{py,nix}
+    └── hebrah-sidecar-writeback.{py,nix}
 ```
-
-Future production: upload rootfs to `s3://hebrah-artifacts/sidecar/{version}/rootfs.erofs` and pin `SIDECAR_ROOTFS_VERSION` on orchestrator hosts.
 
 ## Env injected at VM start
 
@@ -107,3 +129,12 @@ Written by orchestrator to `$HEBRAH_VM_CONFIG_DIR/hebrah.env`:
 | `HEBRAH_INTERNAL_SECRET` | Shared secret for `/v1/internal/sidecar/events` |
 | `HEBRAH_WG_PRIVATE_KEY` | WireGuard private key (microvm-nix mode) |
 | `HEBRAH_WG_LISTEN_PORT` | UDP listen port |
+
+## Security
+
+See [SECURITY.md](./SECURITY.md). For active VM platform work, see
+[`hebrah-vm-templates/SECURITY.md`](https://github.com/Hebrah-inc/hebrah-vm-templates/blob/main/SECURITY.md).
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
