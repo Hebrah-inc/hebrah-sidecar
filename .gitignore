@@ -3,3 +3,8 @@ result
 .direnv/
 *.img
 *.qcow2
+
+# Python — keep guest source reproducible from a single .py file
+__pycache__/
+*.pyc
+*.pyo
